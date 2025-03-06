@@ -1,7 +1,8 @@
-use std::env;
-use chrono::{DateTime, Local};
+use std::{env, str::FromStr};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
-use rust_decimal::Decimal;
+use rust_decimal::{prelude::{FromPrimitive, Zero}, Decimal};
+use rust_decimal_macros::dec;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -16,6 +17,7 @@ fn main() {
         Err(error) => panic!("Problem opening MMEX database: {error:?}"),
     };
 
+    // Get a list of all unique stocks in the MMEX DB
     let mut statement = match conn.prepare("SELECT STOCKID, STOCKNAME, SYMBOL FROM STOCK_V1") {
         Ok(res) => res,
         Err(error) => panic!("Problem preparing stock list SQL statement: {error:?}"),
@@ -30,21 +32,110 @@ fn main() {
         Ok(iter) => iter,
         Err(error) => panic!("Problem handling results of stock list SQL statement: {error:?}"),
     };
+    
+    let mut stock_data_vec = Vec::new();
 
+    // Pull out all of the transactions for every stock
     for stock in stock_iter {
-        println!("Found stock {:?}", stock.unwrap());
+        let mut stock_data = StockData {
+            stock: stock.unwrap(),
+            transactions: Vec::new(),
+            share_count: 0,
+            capital_gain: Decimal::zero(),
+        };
+
+        // Collect all of the transactions for a particular stock
+        let statement = format!(
+            "SELECT 
+                sinfo.SHARENUMBER,
+                sinfo.SHAREPRICE,
+                sinfo.SHARECOMMISSION,
+                ca.TRANSAMOUNT,
+                ca.TRANSDATE
+            FROM SHAREINFO_V1 AS sinfo
+            JOIN CHECKINGACCOUNT_V1 AS ca ON sinfo.CHECKINGACCOUNTID = ca.TRANSID
+            JOIN TRANSLINK_V1 AS tl ON sinfo.CHECKINGACCOUNTID = tl.CHECKINGACCOUNTID
+            JOIN STOCK_V1 AS s ON s.STOCKID = tl.LINKRECORDID
+            WHERE s.STOCKID = {}
+            ORDER BY ca.TRANSDATE ASC", stock_data.stock.id);
+
+        let mut statement =  match conn.prepare(statement.as_str()) {
+            Ok(res) => res,
+            Err(error) => panic!("Problem preparing stock data SQL statement: {error:?}"),
+        };
+
+        let transaction_iter = match statement.query_map([], |row| {
+            let date: String = row.get(4)?;
+            let date = NaiveDate::parse_from_str(date.as_str(), "%Y-%m-%dT%H:%M:%S")
+                .expect("Could not parse date");
+
+            let number: f64 = row.get(0)?;
+            let number = Decimal::from_f64(number)
+                .expect("Could not parse share number");
+
+            let price: f64 = row.get(1)?;
+            let price = Decimal::from_f64(price)
+                .expect("Could not parse price");
+
+            let commission: f64 = row.get(2)?;
+            let commission = Decimal::from_f64(commission)
+                .expect("Could not parse commission");
+
+            let amount: f64 = row.get(3)?;
+            let amount = Decimal::from_f64(amount)
+                .expect("Could not parse amount");
+
+            Ok(Transaction {
+                date: date,
+                number: number,
+                price: price,
+                commission: commission,
+                amount: amount,
+                commission_accounted_for: false,
+            })
+        }) {
+            Ok(iter) => iter,
+            Err(error) => panic!("Problem handling results of the stock transactions statement: {error:?}"),
+        };
+
+        for transaction in transaction_iter {
+            stock_data.transactions.push(transaction.unwrap());
+        }
+
+        stock_data_vec.push(stock_data);
     }
+
+    for stock in stock_data_vec {
+        println!("{:?}", stock);
+    }
+
 }
 
 
 // Holds all of the required information for a single share transaction
+#[derive(Debug)]
 struct Transaction {
-    date: DateTime<Local>,
+    date: NaiveDate,
     number: Decimal,
     price: Decimal,
     commission: Decimal,
     amount: Decimal,
     commission_accounted_for: bool,
+}
+
+#[derive(Debug)]
+struct StockData {
+    stock: Stock,
+    transactions: Vec<Transaction>,
+    share_count: i32,
+    capital_gain: Decimal,
+}
+
+#[derive(Debug)]
+struct Stock {
+    id: u64,
+    name: String,
+    symbol: String,
 }
 
 // SQL to grab all stock names, save to variable
@@ -66,20 +157,6 @@ struct Transaction {
                 // flag it (if not already flagged)
             // Only sales between the time range will trigger capital gains tax
         // Need a variable to hold accumulative capital gains/loss
-
-struct StockRecords {
-    stock: Stock,
-    transactions: Vec<Transaction>,
-    share_count: i32,
-    capital_gain: Decimal,
-}
-
-#[derive(Debug)]
-struct Stock {
-    id: u32,
-    name: String,
-    symbol: String,
-}
 
 
 // Need to account for 50% capital gains savings
