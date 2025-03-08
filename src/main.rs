@@ -95,14 +95,24 @@ fn main() {
             let amount = Decimal::from_f64(amount)
                 .expect("Could not parse amount");
 
-            Ok(Transaction {
-                date: date,
-                number: number,
-                price: price,
-                commission: commission,
-                amount: amount,
-                commission_accounted_for: false,
-            })
+            if number > Decimal::zero() {
+                Ok(Transaction::Purchase {
+                    date,
+                    number,
+                    price,
+                    commission,
+                    amount,
+                })
+            } else {
+                Ok(Transaction::Sale {
+                    date,
+                    number,
+                    price,
+                    commission,
+                    amount,
+                    capital_gains: Decimal::zero(),
+                })
+            }
         }) {
             Ok(iter) => iter,
             Err(error) => panic!("Problem handling results of the stock transactions statement: {error:?}"),
@@ -125,13 +135,22 @@ fn main() {
 // Holds all of the required information for a single share transaction
 #[derive(Debug)]
 #[derive(Clone)]
-struct Transaction {
-    date: NaiveDate,
-    number: Decimal,
-    price: Decimal,
-    commission: Decimal,
-    amount: Decimal,
-    commission_accounted_for: bool,
+enum Transaction {
+    Purchase {
+        date: NaiveDate,
+        number: Decimal,
+        price: Decimal,
+        commission: Decimal,
+        amount: Decimal,
+    },
+    Sale {
+        date: NaiveDate,
+        number: Decimal,
+        price: Decimal,
+        commission: Decimal,
+        amount: Decimal,
+        capital_gains: Decimal,
+    }
 }
 
 #[derive(Debug)]
