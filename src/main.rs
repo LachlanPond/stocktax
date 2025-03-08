@@ -1,5 +1,5 @@
 use std::{env, str::FromStr};
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, FixedOffset, Local, Months, NaiveDate, NaiveDateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use rust_decimal::{prelude::{FromPrimitive, Zero}, Decimal};
 use rust_decimal_macros::dec;
@@ -9,6 +9,16 @@ fn main() {
     dbg!(args.clone());
 
     let path = &args[1];
+
+    let date_from = match NaiveDate::parse_from_str(&args[2], "%Y-%m-%d") {
+        Ok(date) => date,
+        Err(_) => panic!("Invalid from date, format should be: YYYY-MM-DD"),
+    };
+
+    let date_to = match NaiveDate::parse_from_str(&args[2], "%Y-%m-%d") {
+        Ok(date) => date,
+        Err(_) => panic!("Invalid to date, format should be: YYYY-MM-DD"),
+    };
 
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY);
 
@@ -114,6 +124,7 @@ fn main() {
 
 // Holds all of the required information for a single share transaction
 #[derive(Debug)]
+#[derive(Clone)]
 struct Transaction {
     date: NaiveDate,
     number: Decimal,
